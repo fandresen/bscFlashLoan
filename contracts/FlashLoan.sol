@@ -14,14 +14,58 @@ contract FlashLoan {
     IERC20 private immutable token1;
     IUniswapV3Pool private immutable pool;
 
-    address private constant deployer =
-        0x41ff9AA7e16B8B1a8a8dc4f0eFacd93D02d071c9;
+    address private constant deployer = 0x41ff9AA7e16B8B1a8a8dc4f0eFacd93D02d071c9;
+
+    struct FlashCallBackData{
+        uint amount0;
+        uint amount1;
+        address caller;
+        address[2] path;
+        uint8[3] exchRoute;
+        uint24 fee;
+    }
 
     constructor(address _token0, address _token1, uint24 _fee) {
         token0 = IERC20(_token0);
         token1 = IERC20(_token1);
         pool = IUniswapV3Pool(getPool(_token0,_token1,_fee));
-        console.log(address(pool));
+    }
+
+    function flashLoanRequest(
+        address[2] memory _path,
+        uint256 _amount0,
+        uint256 _amount1,
+        uint24 _fee,
+        uint8[3] memory _exchRoute
+    ) external {
+        bytes memory data = abi.encode(FlashCallBackData({
+            amount0: _amount0,
+            amount1: _amount1,
+            caller: msg.sender,
+            path: _path,
+            exchRoute: _exchRoute,
+            fee: _fee
+        }));
+        console.log("");
+        console.log("FlashLoan Pool Adress: ", address(pool));
+        IUniswapV3Pool(pool).flash(address(this), _amount0, _amount1, data);
+    }
+
+    function pancakeV3FlashCallback(
+        uint256 fee0,
+        uint256 fee1,
+        bytes calldata data
+    ) external{
+        require(msg.sender == address(pool), "not authorized");
+        FlashCallBackData memory decoded = abi.decode(data,(FlashCallBackData));
+
+        //Initialize
+        IERC20 baseToken = (fee0 >0 ) ? token0 : token1;
+        uint256 acquiredAmount = (fee0 > 0) ? decoded.amount0 : decoded.amount1;
+        console.log('Fee0: ',fee0);
+        console.log('Fee1: ',fee1);
+        console.log('BaseToken: ',address(baseToken));
+        console.log('BORROW: ',acquiredAmount);
     }
 
     function getPool(address _token0,address _token1,uint24 _fee) public pure returns (address){
