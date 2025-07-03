@@ -10,6 +10,13 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {SafeMath} from "@openzeppelin/contracts/utils/math/SafeMath.sol";
 
 contract FlashLoan {
+    using SafeERC20 for IERC20;
+    using SafeMath for uint256;
+
+    //Exchange Router Address
+    IUniswapV2Router02 constant pancakeswapV2 = IUniswapV2Router02(0x10ED43C718714eb63d5aA57B78B54704E256024E);
+    ISwapRouter constant pancakeswapV3 = ISwapRouter(0x1b81D678ffb9C0263b24A97847620C99d213eB14);
+
     IERC20 private immutable token0;
     IERC20 private immutable token1;
     IUniswapV3Pool private immutable pool;
@@ -66,7 +73,86 @@ contract FlashLoan {
         console.log('Fee1: ',fee1);
         console.log('BaseToken: ',address(baseToken));
         console.log('BORROW: ',acquiredAmount);
+
+        //Trade 1
+        acquiredAmount = _place_swap(
+            acquiredAmount,
+            [address(baseToken), decoded.path[0]],
+            decoded.exchRoute[0],
+            decoded.fee
+        );
+        console.log("Swap1 Token: ", decoded.path[0]);
+        console.log("Swap1 Amount: ", acquiredAmount);
+        
+        // Trade 2 
+        acquiredAmount = _place_swap(
+            acquiredAmount,
+            [decoded.path[0],decoded.path[1]],
+            decoded.exchRoute[0],
+            decoded.fee
+        );
+        console.log("Swap1 Token: ", decoded.path[1]);
+        console.log("Swap1 Amount: ", acquiredAmount);
+
+        // Trade 3 
+        acquiredAmount = _place_swap(
+            acquiredAmount,
+            [decoded.path[1],address(baseToken)],
+            decoded.exchRoute[2],
+            decoded.fee
+        );
+        console.log("Swap3 Token: ", address(baseToken));
+        console.log("Swap3 Amount: ", acquiredAmount);
+
+        //Repay the Flashloan
     }
+
+    function _place_swap(
+        uint256 _amountIn,
+        address[2] memory _tokenPath,
+        uint8 _routing,
+        uint24 _v3_fee
+    ) private returns (uint256){
+        //Initialize
+        uint deadline = block.timestamp + 30;
+        uint256 swap_amount_out = 0;
+
+        address[] memory path = new address[](2);
+        path[0] = _tokenPath[0];
+        path[1] = _tokenPath[1];
+
+        //Handle for PancakeSwap V2
+        if(_routing == 0){
+            TransferHelper.safeApprove(_tokenPath[0], address(pancakeswapV2), _amountIn);
+            swap_amount_out = pancakeswapV2.swapExactTokensForTokens({
+                amountIn: _amountIn,
+                amountOutMin: 0,
+                path: path, 
+                to:address(this),
+                deadline: deadline
+                })[1];
+        //Handle for PancakeSwap V3
+        } else if(_routing == 1){
+            TransferHelper.safeApprove(_tokenPath[0], address(pancakeswapV3), _amountIn);
+            uint256 amountOutMinimum = 0;
+            uint160 sqrtPriceLimitX96 = 0;
+            ISwapRouter.ExactInputSingleParams memory params = ISwapRouter
+                .ExactInputSingleParams({
+                    tokenIn: _tokenPath[0],
+                    tokenOut: _tokenPath[1],
+                    fee: _v3_fee,
+                    recipient: address(this),
+                    deadline: deadline,
+                    amountIn : _amountIn,
+                    amountOutMinimum : amountOutMinimum,
+                    sqrtPriceLimitX96 : sqrtPriceLimitX96
+                }); 
+           swap_amount_out = pancakeswapV3.exactInputSingle(params);
+        }
+
+        return swap_amount_out;
+        
+    }   
 
     function getPool(address _token0,address _token1,uint24 _fee) public pure returns (address){
         PoolAdress.PoolKey memory poolKey = PoolAdress.getPoolKey(_token0, _token1, _fee);
