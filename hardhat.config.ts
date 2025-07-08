@@ -7,6 +7,7 @@ dotenv.config();
 const mainnet_provider_url = process.env.MAINNET_PROVIDER_URL!;
 const testnet_provider_url = process.env.TESTNET_PROVIDER_URL!;
 const private_key = process.env.PRIVATE_KEY!;
+const coinMarketCap_key = process.env.COIN_MARKETCAP_API_KEY!;
 
 const config: HardhatUserConfig = {
   solidity: {
@@ -14,7 +15,7 @@ const config: HardhatUserConfig = {
   },
   networks: {
     hardhat: {
-      forking: { url: mainnet_provider_url },
+      forking: { url: mainnet_provider_url }
     },
     mainnet: {
       url: testnet_provider_url,
@@ -27,8 +28,14 @@ const config: HardhatUserConfig = {
       accounts: [private_key],
     },
   },
+  gasReporter: {
+    enabled: process.env.REPORT_GAS !== undefined,
+    currency:"USD",
+    coinmarketcap: coinMarketCap_key,
+    gasPriceApi: "https://api.bscscan.com/api?module=proxy&action=eth_gasPrice&apikey=QYVJ82KRVRKTADXH9CGFXU8CDMP6IE5QZI"
+  },
   mocha:{
-    timeout: 120000,
+    timeout: 300000,
   }
 };
 
