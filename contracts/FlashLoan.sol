@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.10;
+pragma solidity ^0.8.20;
 
 import "hardhat/console.sol";
 import {ISwapRouter} from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
@@ -21,6 +21,8 @@ contract FlashLoan {
     IUniswapV3Pool public immutable pool;
 
     address public owner;
+
+    address private constant deployer = 0x41ff9AA7e16B8B1a8a8dc4f0eFacd93D02d071c9;
 
     modifier onlyOwner() {
         require(msg.sender == owner, "Only owner can call this function.");
@@ -59,11 +61,24 @@ contract FlashLoan {
         uint amountOutMin;
     }
 
-    constructor(address _token0, address _token1, uint24 _fee, address _factoryAddress) {
+    constructor(address _token0, address _token1, uint24 _fee) {
         token0 = IERC20(_token0);
         token1 = IERC20(_token1);
-        pool = IUniswapV3Pool(PoolAdress.computeAddress(_factoryAddress, PoolAdress.getPoolKey(_token0, _token1, _fee)));
+        pool = IUniswapV3Pool(getPool(_token0, _token1, _fee));
         console.log("FlashLoan Pool Address set to:", address(pool));
+        owner = msg.sender;
+    }
+
+    function getPool(address _token0,address _token1,uint24 _fee) public pure returns (address){
+        PoolAdress.PoolKey memory poolKey = PoolAdress.getPoolKey(_token0, _token1, _fee);
+        return PoolAdress.computeAddress(deployer, poolKey);
+    }
+
+    event FundsAdded(address indexed sender, uint amount);
+
+    function add() public  payable {
+        require(msg.value > 0, "Send some ether");
+        emit FundsAdded(msg.sender, msg.value);
     }
 
     function flashLoanRequest(
@@ -241,7 +256,7 @@ library PoolAdress {
     }
 
     function computeAddress(
-        address factory,
+        address deployer,
         PoolKey memory key
     ) internal pure returns (address pool) {
         require(key.token0 < key.token1, "PoolAdress: TOKEN_ORDER");
@@ -251,7 +266,7 @@ library PoolAdress {
                     keccak256(
                         abi.encodePacked(
                             hex"ff",
-                            factory,
+                            deployer,
                             keccak256(abi.encode(key.token0, key.token1, key.fee)),
                             POOL_INIT_CODE_HASH
                         )

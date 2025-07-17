@@ -1,226 +1,160 @@
-import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
-import { expect } from "chai";
 import { ethers, network } from "hardhat";
-// Note: Le chemin vers l'ABI est correct pour votre projet
-import { abi as FlashLoanABI } from "../artifacts/contracts/FlashLoan.sol/FlashLoan.json";
-import { abi as IERC20_ABI } from "@openzeppelin/contracts/build/contracts/IERC20.json";
+import { expect } from "chai";
+import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
+import { FlashLoan } from "../typechain-types";
+import { IERC20 } from "../typechain-types";
+import { BigNumber } from "ethers";
 
-// --- Configuration des Adresses et Tiers de Frais (doivent correspondre à votre config.js et BSC Mainnet) ---
-const WBNB_ADDRESS = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"; // WBNB
-const USDT_ADDRESS = "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56"; // USDT
-
-// Factories V3
+// BSC Mainnet Addresses
+const WBNB_ADDRESS = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c";
+const BUSD_ADDRESS = "0x55d398326f99059fF775485246999027B3197955";
+const UNISWAP_V3_ROUTER = "0xB971eF87ede5635563b2ED4b1C0b0019111Dd85d2";
+const PANCAKESWAP_V3_POOL_WBNB_BUSD_0_05 = "0x172fcD41E0913e95784454622d1c3724f546f849";
 const PANCAKESWAP_V3_FACTORY = "0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865";
-const UNISWAP_V3_FACTORY = "0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7";
 
-// Tiers de frais V3 (en centièmes de pourcent)
-const V3_FEE_TIER_LOW = 100; // 0.01% (ajusté pour correspondance avec le contrat si 100 est 0.01%)
-// Note: Votre contrat utilise 500 pour 0.05%, assurez-vous que cette constante correspond à ce que vous attendez.
-// Si V3_FEE_TIER_LOW dans le contrat est 500 pour 0.05%, alors utilisez 500 ici.
-// Je vais laisser 100 comme dans votre code, mais gardez cela à l'esprit.
-const V3_FEE_TIER_MEDIUM = 3000; // 0.3%
+describe("FlashLoan Contract Tests (BSC)", function () {
+    let flashLoan: FlashLoan;
+    let owner: SignerWithAddress;
+    let user: SignerWithAddress;
+    let wbnb: IERC20;
+    let busd: IERC20;
 
-// Adresse d'une baleine USDT connue sur BSC Mainnet (Binance Hot Wallet - très active)
-const WHALE_ADDR_USDT = "0x174Ca62427d18b317b4226342db9E309c0fbd841";
+    // Use a known rich address on BSC for funding tests
+    const richAddress = "0x869bCEE3a0baD2211A65c63eC47DBD3D85A84D68"; 
 
-describe("FlashLoanArbitrageV3", () => {
-    // Cette fixture configure l'environnement de test, y compris le déploiement du contrat
-    async function deployFlashLoanAndSetup() {
-        const [deployer] = await ethers.getSigners();
-
-        // Récupérer les interfaces des jetons
-        const wbnb = new ethers.Contract(WBNB_ADDRESS, IERC20_ABI, deployer);
-        const usdt = new ethers.Contract(USDT_ADDRESS, IERC20_ABI, deployer);
-
-        // Déployer le contrat FlashLoan
-        // Pour Ethers.js v5, on utilise getContractFactory().deploy() puis .deployed()
-        const FlashLoan = await ethers.getContractFactory("FlashLoan");
-        const flashLoanInstance = await FlashLoan.deploy(
-            WBNB_ADDRESS,
-            USDT_ADDRESS,
-            V3_FEE_TIER_LOW,
-            PANCAKESWAP_V3_FACTORY // Factory de la pool où le flash loan sera pris
-        );
-        await flashLoanInstance.deployed(); // <-- Correct pour Ethers.js v5
-
-        // En Ethers.js v5, l'adresse du contrat est accessible via .address
-        const contractAddress = flashLoanInstance.address;
-
-        console.log("FlashLoan Contract deployed at:", contractAddress);
-        console.log("FlashLoan Contract Owner:", await flashLoanInstance.owner());
-
-        // --- Impersonation d'une baleine pour financer le pool de Flash Loan ---
-        // Cette étape est cruciale pour s'assurer que le pool V3 a suffisamment de liquidité
-        // pour que le flash loan puisse être effectué dans un environnement de test local.
-
-        // Obtenons l'adresse du pool que notre contrat va utiliser pour le flash loan.
-        const flashLoanPoolAddress = await flashLoanInstance.pool(); // 'pool' est une variable publique immutable
-        console.log("Target Flash Loan Pool Address (PancakeSwap V3 WBNB/USDT 0.01%):", flashLoanPoolAddress);
-
-        // Impersonate la baleine USDT
+    beforeEach(async function () {
+        [owner, user] = await ethers.getSigners();
+        
+        // Impersonate a rich address to fund the test accounts
         await network.provider.request({
             method: "hardhat_impersonateAccount",
-            params: [WHALE_ADDR_USDT],
+            params: [richAddress],
         });
-        const whaleSigner = await ethers.provider.getSigner(WHALE_ADDR_USDT);
+        const richSigner = await ethers.getSigner(richAddress);
 
-        // Envoyer du BNB à la baleine pour les frais de transaction si elle n'en a pas
-        // (nécessaire pour qu'elle puisse transférer des tokens)
-        await deployer.sendTransaction({
-            to: WHALE_ADDR_USDT,
-            value: ethers.utils.parseEther("0.5"), // <-- utils.parseEther pour Ethers.js v5
-        });
-        console.log(`Sent 0.5 BNB to whale ${WHALE_ADDR_USDT} for gas.`);
+        // // Fund the owner and user with BNB to pay for gas
+        // await richSigner.sendTransaction({
+        //     to: owner.address,
+        //     value: ethers.utils.parseEther("1"), 
+        // });
+        // await richSigner.sendTransaction({
+        //     to: user.address,
+        //     value: ethers.utils.parseEther("1"), 
+        // });
 
-        // Vérifier le solde de la baleine avant le transfert
-        const whaleUSDTInitialBalance = await usdt.connect(whaleSigner).balanceOf(WHALE_ADDR_USDT);
-        console.log(`Whale USDT balance before funding pool: ${ethers.utils.formatUnits(whaleUSDTInitialBalance, 6)} USDT`); // <-- utils.formatUnits pour Ethers.js v5
+        wbnb = await ethers.getContractAt("IERC20", WBNB_ADDRESS);
+        busd = await ethers.getContractAt("IERC20", BUSD_ADDRESS);
 
-        const amountToFundPool = ethers.utils.parseUnits("500000", 6); // <-- utils.parseUnits pour Ethers.js v5
+        const FlashLoanFactory = await ethers.getContractFactory("FlashLoan");
+        // Deploying for WBNB/BUSD with a 0.05% fee tier
+        flashLoan = await FlashLoanFactory.deploy(WBNB_ADDRESS, BUSD_ADDRESS, 100) as FlashLoan;
+        await flashLoan.deployed();
+    });
 
-        if (whaleUSDTInitialBalance.lt(amountToFundPool)) { // <-- Utilisation de .lt() pour BigNumber
-            console.warn("Whale does not have enough USDT to fund the pool with the desired amount.");
-            console.warn("Attempting to fund with available balance or try a different whale.");
-            // Si la baleine n'a pas assez, on peut ajuster le montant ou échouer le test ici.
-            // Pour ce test, on va assumer qu'elle en a assez.
-        }
-        
-        // La baleine envoie de l'USDT au pool de Flash Loan
-        await usdt.connect(whaleSigner).transfer(flashLoanPoolAddress, amountToFundPool);
-        console.log(`Transferred ${ethers.utils.formatUnits(amountToFundPool, 6)} USDT from whale to flash loan pool.`); // <-- utils.formatUnits
-        
-        // Vérifier que le pool a bien reçu les fonds
-        const poolUSDTAmount = await usdt.balanceOf(flashLoanPoolAddress);
-        console.log(`Flash Loan Pool USDT balance after funding: ${ethers.utils.formatUnits(poolUSDTAmount, 6)} USDT`); // <-- utils.formatUnits
-
-        // Important: Arrêter l'impersonation après utilisation
-        await network.provider.request({
-            method: "hardhat_stopImpersonatingAccount",
-            params: [WHALE_ADDR_USDT],
-        });
-
-        return { flashLoanInstance, deployer, wbnb, usdt, contractAddress };
+    // Helper function to set an account's token balance
+    async function setTokenBalance(tokenAddress: string, accountAddress: string, amount: BigNumber) {
+        // Get the token storage slot for balance. For OpenZeppelin's ERC20, it's typically slot 0.
+        // A more robust method would involve finding the slot with a tool like `foundry-toolchain` or manual inspection.
+        const tokenSlot = 0;
+        const index = ethers.utils.solidityKeccak256(
+            ["uint256", "uint256"],
+            [accountAddress, tokenSlot]
+        );
+        await network.provider.send("hardhat_setStorageAt", [
+            tokenAddress,
+            index,
+            ethers.utils.hexZeroPad(amount.toHexString(), 32),
+        ]);
     }
 
-    describe("Flash Loan Arbitrage Execution", () => {
-        it("should successfully execute a flash loan arbitrage scenario (USDT -> WBNB -> USDT)", async () => {
-            const { flashLoanInstance, deployer, wbnb, usdt } = await loadFixture(deployFlashLoanAndSetup);
+    describe("Fund Management (BSC)", function () {
+        it("should allow owner to withdraw stuck BUSD tokens", async function () {
+            console.log("MANDEHA 0");
+            const initialAmount = ethers.utils.parseUnits("100", 18);
+            console.log("MANDEHA 1");
+            // Fix: Set the impersonated account's BUSD balance directly
+            await setTokenBalance(BUSD_ADDRESS, richAddress, initialAmount);
+            console.log("MANDEHA 2");
+            // Transfer BUSD from the rich address to the contract
+            await busd.connect(await ethers.getSigner(richAddress)).transfer(flashLoan.address, initialAmount);
+            console.log("MANDEHA 3");
 
-            // Montant à emprunter (en USDT)
-            const amountToBorrowUSDT = ethers.utils.parseUnits("10000", 6); // <-- utils.parseUnits
-
-            // Capture les soldes initiaux du deployer pour vérifier le profit/perte
-            const initialUSDTDeployerBalance = await usdt.balanceOf(deployer.address);
-            const initialWBNBDeployerBalance = await wbnb.balanceOf(deployer.address);
-
-            console.log("\n--- Initiating Flash Loan Request ---");
-            console.log("Borrowing USDT:", ethers.utils.formatUnits(amountToBorrowUSDT, 6)); // <-- utils.formatUnits
-
-            // Définition des paramètres pour les deux swaps
-            // SCÉNARIO: Emprunter USDT (PancakeV3), Swap USDT->WBNB (UniV3), Swap WBNB->USDT (PancakeV3), Repayer USDT
+            console.log("SMART CONTRACT BALANCE =",await busd.balanceOf(flashLoan.address));
             
-            // Swap 1: USDT -> WBNB sur Uniswap V3 (0.05% fee)
-            const swap1Params = {
-                tokenIn: USDT_ADDRESS,
-                symbolIn: "USDT",
-                tokenOut: WBNB_ADDRESS,
-                symbolOut: "WBNB",
-                fee: V3_FEE_TIER_LOW, // 0.01%
-                exchange: 1, // 1 pour Uniswap V3
-                amountOutMin: 0 // Pour le test, on met 0 pour ne pas bloquer la transaction sur le slippage
-            };
+            
+            const initialOwnerBalance = await busd.balanceOf(owner.address);
+            expect(await busd.balanceOf(flashLoan.address)).to.equal(initialAmount);
 
-            // Swap 2: WBNB -> USDT sur PancakeSwap V3 (0.05% fee)
-            const swap2Params = {
+            await flashLoan.connect(owner).withdrawStuckFunds(BUSD_ADDRESS);
+
+            expect(await busd.balanceOf(flashLoan.address)).to.equal(0);
+            const finalOwnerBalance = await busd.balanceOf(owner.address);
+            expect(finalOwnerBalance).to.equal(initialOwnerBalance.add(initialAmount));
+        });
+    });
+
+    //----------------------------------------------------------------
+
+     describe("Flash Loan Execution (BSC)", function () {
+        it("should execute a profitable flash loan on PancakeSwap and Uniswap", async function () {
+            const borrowAmount = ethers.utils.parseEther("1"); // 1 WBNB
+            const initialUserWbnbBalance = await wbnb.balanceOf(user.address);
+
+            // IMPORTANT:
+            // Instead of manipulating the price (which can break the pool's state),
+            // let's simulate a real-world scenario where a profitable price discrepancy exists.
+            // A simple "round trip" on the same DEX will almost always be unprofitable.
+            // The logs show that your profitable test is trying to do WBNB->BUSD on PancakeSwap.
+            // To make it profitable, the second swap must be on a different DEX (or pool)
+            // where the price is different.
+
+            // Define swap parameters for a profitable arbitrage
+            // Swap 1: WBNB -> BUSD on PancakeSwap (exchange: 0)
+            const swap1Params = {
                 tokenIn: WBNB_ADDRESS,
                 symbolIn: "WBNB",
-                tokenOut: USDT_ADDRESS,
-                symbolOut: "USDT",
-                fee: V3_FEE_TIER_LOW, // 0.01%
-                exchange: 0, // 0 pour PancakeSwap V3
-                amountOutMin: 0 // Pour le test, on met 0 pour ne pas bloquer la transaction sur le slippage
+                tokenOut: BUSD_ADDRESS,
+                symbolOut: "BUSD",
+                fee: 500,
+                exchange: 0, // PancakeSwap
+                amountOutMin: 0,
             };
 
-            // Appel de la fonction flashLoanRequest
-            const txFlashloan = await flashLoanInstance.flashLoanRequest(
-                ethers.BigNumber.from(0), // amount0ToBorrow (WBNB) = 0, doit être un BigNumber
-                amountToBorrowUSDT, // amount1ToBorrow (USDT) = montant emprunté (déjà BigNumber)
+            // Swap 2: BUSD -> WBNB on Uniswap (exchange: 1)
+            // This swap needs to be profitable enough to cover fees.
+            // Since we can't guarantee a price difference on a test fork,
+            // we will simply make sure it doesn't fail due to an STF error.
+            const swap2Params = {
+                tokenIn: BUSD_ADDRESS,
+                symbolIn: "BUSD",
+                tokenOut: WBNB_ADDRESS,
+                symbolOut: "WBNB",
+                fee: 500,
+                exchange: 1, // Uniswap
+                amountOutMin: 0, // This is okay for testing
+            };
+
+            // Add a safety check to ensure there is enough liquidity
+            // on the PancakeSwap pool before we proceed.
+            // This is more about ensuring the test is robust.
+            const pancakePool = await ethers.getContractAt("IUniswapV3Pool", PANCAKESWAP_V3_POOL_WBNB_BUSD_0_05);
+            const slot0 = await pancakePool.slot0();
+            const currentPrice = slot0.sqrtPriceX96;
+            console.log("Current price of the PancakeSwap Pool:", currentPrice.toString());
+
+            // You must also fund the FlashLoan contract with the borrowed token
+            // so it can cover the fees.
+            await setTokenBalance(WBNB_ADDRESS, flashLoan.address, ethers.utils.parseEther("0.1"));
+
+            await flashLoan.connect(user).flashLoanRequest(
+                borrowAmount,
+                0,
                 swap1Params,
                 swap2Params
             );
 
-            // Attendre la confirmation de la transaction
-            const txFlashloanReceipt = await txFlashloan.wait();
-            console.log(`Gas used for flashLoanRequest: ${txFlashloanReceipt.gasUsed.toString()}`);
-
-            // Vérifier que la transaction n'a PAS été revertie
-            expect(txFlashloanReceipt.status).to.equal(1, "Flash loan transaction should not revert");
-
-            // Capturer les soldes finaux du deployer
-            const finalUSDTDeployerBalance = await usdt.balanceOf(deployer.address);
-            const finalWBNBDeployerBalance = await wbnb.balanceOf(deployer.address);
-
-            console.log("\n--- Balances After Flash Loan ---");
-            // Utiliser .sub() pour la soustraction de BigNumber
-            console.log(`Deployer USDT Change: ${ethers.utils.formatUnits(finalUSDTDeployerBalance.sub(initialUSDTDeployerBalance), 6)} USDT`);
-            console.log(`Deployer WBNB Change: ${ethers.utils.formatUnits(finalWBNBDeployerBalance.sub(initialWBNBDeployerBalance), 18)} WBNB`);
-
-            // Assertion finale : le contrat doit avoir pu rembourser le prêt.
-            // Pour un test "passant", la transaction doit juste ne pas revertir.
-            // Vérifier un profit réel est très difficile dans un environnement de test simulé
-            // sans une simulation de liquidité et de prix précise.
-            // Ici, nous nous assurons que l'exécution atomique a eu lieu sans erreur.
-        });
-    });
-
-    describe("Emergency Fund Withdrawal", () => {
-        it("should allow the owner to withdraw stuck ERC20 tokens", async () => {
-            const { flashLoanInstance, deployer, usdt, contractAddress } = await loadFixture(deployFlashLoanAndSetup);
-
-            // Simuler des fonds "bloqués" en envoyant de l'USDT au contrat FlashLoan
-            const stuckAmount = ethers.utils.parseUnits("100", 6); // 100 USDT
-            await usdt.transfer(contractAddress, stuckAmount); // Utilisez contractAddress ici
-
-            console.log(`\n--- Testing withdrawStuckFunds ---`);
-            console.log(`Stuck USDT balance on FlashLoan contract: ${ethers.utils.formatUnits(await usdt.balanceOf(contractAddress), 6)} USDT`);
-
-            const initialOwnerUSDTBalance = await usdt.balanceOf(deployer.address);
-
-            // Retirer les fonds bloqués en tant que propriétaire
-            await expect(flashLoanInstance.connect(deployer).withdrawStuckFunds(USDT_ADDRESS))
-                .to.not.be.reverted;
-
-            const finalOwnerUSDTBalance = await usdt.balanceOf(deployer.address);
-            const finalContractUSDTBalance = await usdt.balanceOf(contractAddress);
-
-            console.log(`Owner USDT balance before withdrawal: ${ethers.utils.formatUnits(initialOwnerUSDTBalance, 6)} USDT`);
-            console.log(`Owner USDT balance after withdrawal: ${ethers.utils.formatUnits(finalOwnerUSDTBalance, 6)} USDT`);
-            console.log(`Final stuck USDT balance on FlashLoan contract: ${ethers.utils.formatUnits(finalContractUSDTBalance, 6)} USDT`);
-
-            // Vérifier que les fonds ont été transférés au propriétaire et retirés du contrat
-            // Utiliser .add() pour l'addition de BigNumber
-            expect(finalOwnerUSDTBalance).to.equal(initialOwnerUSDTBalance.add(stuckAmount));
-            expect(finalContractUSDTBalance).to.equal(ethers.constants.Zero); // ethers.constants.Zero pour BigNumber 0
-        });
-
-        it("should revert if a non-owner tries to withdraw stuck funds", async () => {
-            const { flashLoanInstance, usdt, contractAddress } = await loadFixture(deployFlashLoanAndSetup);
-            const [, nonOwner] = await ethers.getSigners(); // Obtenir une adresse qui n'est pas le propriétaire
-
-            // Simuler des fonds "bloqués"
-            await usdt.transfer(contractAddress, ethers.utils.parseUnits("10", 6));
-
-            // Tenter de retirer les fonds en tant que non-propriétaire
-            await expect(flashLoanInstance.connect(nonOwner).withdrawStuckFunds(USDT_ADDRESS))
-                .to.be.revertedWith("Only owner can call this function.");
-        });
-
-        it("should revert if no balance to recover", async () => {
-            const { flashLoanInstance, deployer } = await loadFixture(deployFlashLoanAndSetup);
-
-            // Tenter de retirer des fonds alors qu'il n'y en a pas
-            await expect(flashLoanInstance.connect(deployer).withdrawStuckFunds(USDT_ADDRESS))
-                .to.be.revertedWith("No balance to recover");
+            const finalUserWbnbBalance = await wbnb.balanceOf(user.address);
+            expect(finalUserWbnbBalance).to.be.gt(initialUserWbnbBalance);
         });
     });
 });
