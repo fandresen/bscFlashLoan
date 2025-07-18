@@ -5,3 +5,5 @@ fee = 100
 token0 = BUSd
 0 = Pancaswap
 1 = Uniswap
+
+PancakeswapV3Factory =  0x41ff9AA7e16B8B1a8a8dc4f0eFacd93D02d071c9
