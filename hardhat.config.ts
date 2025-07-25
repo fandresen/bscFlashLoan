@@ -18,7 +18,7 @@ const config: HardhatUserConfig = {
       forking: { url: mainnet_provider_url }
     },
     mainnet: {
-      url: testnet_provider_url,
+      url: mainnet_provider_url,
       chainId: 56,
       accounts: [private_key],
     },
