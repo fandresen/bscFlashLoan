@@ -10,7 +10,7 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.
 
 /**
  * @title FlashLoan
- * @author Votre Nom
+ * @author Fandresena
  * @notice Contrat d'arbitrage via flash loan, optimisé pour une exécution directe
  * via un RPC privé afin de prévenir le front-running.
  */
