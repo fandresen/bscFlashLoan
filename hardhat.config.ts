@@ -1,3 +1,4 @@
+require("hardhat-tracer");
 import { HardhatUserConfig } from "hardhat/config";
 import dotenv from "dotenv";
 import "@nomicfoundation/hardhat-toolbox";

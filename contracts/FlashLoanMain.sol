@@ -15,7 +15,7 @@ import {IV3SwapRouter as IUniswapBSCRouter} from "./lib/IV3SwapRouterBSCRouter.s
  * @notice Contrat d'arbitrage via flash loan, optimisé pour une exécution directe
  * via un RPC privé afin de prévenir le front-running.
  */
-contract FlashLoan is ReentrancyGuard {
+contract FlashLoanMain is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     // --- Erreurs personnalisées ---
