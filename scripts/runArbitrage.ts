@@ -4,7 +4,7 @@ async function main() {
   console.log("--- Preparation du script d'arbitrage ---");
 
   // --- PARAMETRES A CONFIGURER ---
-  const contractAddress = "0x5Ad33e5b46a2fD8f44BcCcCbb69d6F8DA53Dcf1A";
+  const contractAddress = "0xf6429F70044D9fcdbE0C2DA314679EBE3A2eBf78";
   const deployerAddress = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266";
 
   // Le token que nous allons emprunter est le tokenIn du premier swap (USDT)

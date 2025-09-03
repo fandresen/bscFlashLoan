@@ -5,7 +5,7 @@ async function main() {
   console.log("--- Preparation du script d'arbitrage ---");
 
   // --- PARAMETRES A CONFIGURER ---
-  const contractAddress = "0xe42a9B16a1f9e7aBFAD9cDd430C7dd635332f9f7";
+  const contractAddress = "0x1A60dAD933F0459b7439C91f97eaAf963C0B4544";
 
   const [deployer] = await ethers.getSigners();
 
@@ -19,7 +19,7 @@ async function main() {
     "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c", // WBNB (tokenOut)
     500, // Fee 0.05%
     0, // Exchange: 0 pour PancakeSwap
-    0, // amountOutMin
+    1n, // amountOutMin
   ];
 
   const swap2Params = [
@@ -27,7 +27,7 @@ async function main() {
     "0x55d398326f99059fF775485246999027B3197955", // USDT (tokenOut)
     500, // Fee 0.05%
     1, // Exchange: 1 pour Uniswap
-    0, // amountOutMin
+    1n, // amountOutMin
   ];
   // --- FIN DE LA CONFIGURATION ---
 

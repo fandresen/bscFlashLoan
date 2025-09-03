@@ -173,8 +173,7 @@ contract FlashLoan is ReentrancyGuard {
         );
 
         // --- Remboursement et Profit ---
-        if (finalAmountOfBorrowedToken < amountToRepay)
-            revert InsufficientFundsToRepay();
+         require(finalAmountOfBorrowedToken >= amountToRepay,"InsufficientFundsToRepay");
 
         // 1. Rembourser le prêt + les frais
         borrowedToken.safeTransfer(address(pool), amountToRepay);
